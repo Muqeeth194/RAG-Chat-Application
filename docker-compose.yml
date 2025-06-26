@@ -1,0 +1,37 @@
+services:
+  vector-db:
+    image: qdrant/qdrant
+    container_name: vector-db
+    ports:
+      - 6333:6333
+    networks:
+      - my-network
+
+    # Backend Service
+  backend:
+    image: rag-chat-app-backend
+    container_name: backend
+    ports:
+      - "5000:5000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}  # From .env file
+      - QDRANT_URL=http://vector-db:6333
+    networks:
+      - my-network
+    depends_on:
+      - vector-db
+    restart: unless-stopped
+
+  # Frontend Service
+  frontend:
+    image: rag-chat-app-frontend
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    networks:
+      - my-network
+    restart: unless-stopped
+
+networks:
+  my-network:
+    driver: bridge
