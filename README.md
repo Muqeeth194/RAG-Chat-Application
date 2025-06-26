@@ -33,9 +33,3 @@ A RAG (Retrieval-Augmented Generation) application that allows users to upload P
 - Qdrant Vector Database
 - Multer (File Uploads)
 
-## Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-username/pdf-chatbot.git
-   cd pdf-chatbot
