@@ -1,0 +1,76 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gradient background -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="pdfGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff6b6b;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ee5a24;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="chatGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4ecdc4;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#44a08d;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1" result="coloredBlur"/>
+      <feMerge> 
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background with rounded corners -->
+  <rect width="32" height="32" rx="8" fill="url(#bgGradient)"/>
+  
+  <!-- Floating particles/sparkles -->
+  <circle cx="6" cy="8" r="1" fill="#ffffff" opacity="0.6">
+    <animate attributeName="opacity" values="0.6;1;0.6" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="26" cy="6" r="0.8" fill="#ffffff" opacity="0.4">
+    <animate attributeName="opacity" values="0.4;0.8;0.4" dur="1.5s" repeatCount="indefinite"/>
+  </circle>
+  <circle cx="28" cy="26" r="0.6" fill="#ffffff" opacity="0.5">
+    <animate attributeName="opacity" values="0.5;0.9;0.5" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+  
+  <!-- PDF document with gradient and shadow -->
+  <rect x="6" y="8" width="14" height="16" rx="2" fill="url(#pdfGradient)" filter="url(#glow)"/>
+  
+  <!-- PDF corner fold with 3D effect -->
+  <path d="M17 8 L20 8 L20 11 L17 8" fill="#c44569"/>
+  <path d="M17 8 L20 11 L17 11 L17 8" fill="#f8b500" opacity="0.7"/>
+  
+  <!-- PDF content with animated lines -->
+  <rect x="8" y="12" width="10" height="1.5" fill="white" rx="0.75" opacity="0.9">
+    <animate attributeName="width" values="10;8;10" dur="3s" repeatCount="indefinite"/>
+  </rect>
+  <rect x="8" y="15" width="8" height="1.5" fill="white" rx="0.75" opacity="0.8">
+    <animate attributeName="width" values="8;6;8" dur="2.5s" repeatCount="indefinite"/>
+  </rect>
+  <rect x="8" y="18" width="9" height="1.5" fill="white" rx="0.75" opacity="0.7">
+    <animate attributeName="width" values="9;7;9" dur="2.8s" repeatCount="indefinite"/>
+  </rect>
+  
+  <!-- Modern chat bubble with gradient -->
+  <path d="M18 18 Q18 16 20 16 L26 16 Q28 16 28 18 L28 22 Q28 24 26 24 L22 24 L18 26 Z" 
+        fill="url(#chatGradient)" filter="url(#glow)"/>
+  
+  <!-- Animated chat dots -->
+  <circle cx="21" cy="20" r="1" fill="white">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" begin="0s"/>
+  </circle>
+  <circle cx="23" cy="20" r="1" fill="white">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" begin="0.3s"/>
+  </circle>
+  <circle cx="25" cy="20" r="1" fill="white">
+    <animate attributeName="opacity" values="0.3;1;0.3" dur="1s" repeatCount="indefinite" begin="0.6s"/>
+  </circle>
+  
+  <!-- AI brain/circuit pattern overlay -->
+  <g opacity="0.3">
+    <path d="M10 10 L12 12 M14 10 L16 12 M10 14 L12 16" stroke="white" stroke-width="0.5" fill="none"/>
+  </g>
+</svg>
