@@ -9,6 +9,9 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { Queue } from "bullmq";
+import { Worker } from "bullmq";
+import IORedis from "ioredis";
 
 dotenv.config();
 
@@ -17,6 +20,12 @@ const app = express();
 const PORT = 5000;
 // At the top of your server.js file, replace the hardcoded URL
 const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333";
+
+const connection = new IORedis({ maxRetriesPerRequest: null });
+const largePDFQueue = new Queue("largePDF", { connection });
+const smallPDFQueue = new Queue("smallPDF", { connection });
+
+const jobStatus = new Map();
 
 // middleware
 app.use(cors());
@@ -54,6 +63,127 @@ const upload = multer({
   },
 });
 
+// This will be the function utilized by the worked to process and store the pdf in vector embeddings
+async function processPDF(job) {
+  const { filePath, fileName, originalName, fileSize } = job.data;
+
+  try {
+    console.log("Worker started working on the vector embeddings!");
+
+    // Update job status
+    await job.updateProgress(10);
+
+    const loader = new PDFLoader(filePath); // Use full path, not just filename
+    const docs = await loader.load();
+
+    console.log("PDF loaded, creating text chunks...");
+
+    const textSplitter = new RecursiveCharacterTextSplitter({
+      chunkSize: 1000,
+      chunkOverlap: 200,
+    });
+    const splitDocs = await textSplitter.splitDocuments(docs);
+    await job.updateProgress(50);
+
+    console.log(`Created ${splitDocs.length} text chunks`);
+
+    // Vector Embeddings
+    const embeddingModel = new OpenAIEmbeddings({
+      modelName: "text-embedding-3-large",
+      openAIApiKey: process.env.OPENAI_API_KEY, // Make sure to set this in your .env file
+    });
+    await job.updateProgress(70);
+
+    console.log("Creating vector embeddings...");
+
+    const pdf_id = fileName.split(".")[0];
+
+    // Simple connection test
+    try {
+      const testResponse = await fetch(`${QDRANT_URL}/collections`);
+      console.log(`Qdrant connection test: ${testResponse.status}`);
+    } catch (err) {
+      console.error("Qdrant connection failed!", err);
+    }
+
+    const vectorStore = await QdrantVectorStore.fromDocuments(
+      splitDocs, // Your split documents array
+      embeddingModel,
+      {
+        url: QDRANT_URL,
+        collectionName: pdf_id,
+      }
+    );
+    await job.updateProgress(100);
+
+    console.log("Vector embeddings created successfully!");
+
+    // console.log(vectorStore);
+
+    // console.log('Unique name is: ',uniqueName);
+    console.log("collection name: ", pdf_id);
+
+    // Clean up file after successful processing
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    return {
+      success: true,
+      pdfID: pdf_id,
+      chunksCreated: splitDocs.length,
+      processedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    // Clean up file on error
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    console.error("Worker Processing Error:", error);
+    throw error; // Re-throw so BullMQ knows the job failed
+  }
+}
+
+// Create the workers which will work on the assigned queues and does the steps coded in the processPDF function
+
+for (let i = 0; i < 5; i++) {
+  const smallWorker = new Worker("smallPDF", processPDF, { connection });
+
+  smallWorker.on("completed", (job) => {
+    console.log(`Small PDF job ${job.id} completed`);
+    jobStatus.set(job.id, { status: "completed", result: job.returnvalue });
+  });
+
+  smallWorker.on("failed", (job, err) => {
+    console.error(`Small PDF job ${job.id} failed:`, err.message);
+    jobStatus.set(job.id, { status: "failed", error: err.message });
+  });
+
+  smallWorker.on("progress", (job, progress) => {
+    jobStatus.set(job.id, { status: "processing", progress });
+  });
+
+}
+
+for (let i = 0; i < 2; i++) {
+  const largeWorker = new Worker("largePDF", processPDF, { connection });
+
+  largeWorker.on("completed", (job) => {
+    console.log(`Large PDF job ${job.id} completed`);
+    jobStatus.set(job.id, { status: "completed", result: job.returnvalue });
+  });
+
+  largeWorker.on("failed", (job, err) => {
+    console.error(`Large PDF job ${job.id} failed:`, err.message);
+    jobStatus.set(job.id, { status: "failed", error: err.message });
+  });
+
+  largeWorker.on("progress", (job, progress) => {
+    jobStatus.set(job.id, { status: "processing", progress });
+  });
+
+}
+
 // Routes
 app.get("/health", (req, res) => {
   res.status(200).json({
@@ -75,68 +205,42 @@ app.post("/api/upload", upload.single("pdf"), async (req, res) => {
 
     console.log("File uploaded:", req.file.originalname);
 
-    console.log("Creating vector embeddings...");
+    const jobData = {
+      filePath: req.file.path,
+      fileName: req.file.filename,
+      originalName: req.file.originalname,
+      fileSize: req.file.size,
+    };
 
-    const loader = new PDFLoader(req.file.path); // Use full path, not just filename
-    const docs = await loader.load();
+    // determine the queue based on the uploaded file size
+    const decidedQueue =
+      req.file.size < 2 * 1024 * 1024 ? smallPDFQueue : largePDFQueue;
+    const queueType = req.file.size < 2 * 1024 * 1024 ? "small" : "large";
 
-    console.log("PDF loaded, creating text chunks...");
+    const job = await decidedQueue.add("pdfJob", jobData);
 
-    const textSplitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 200,
-    });
-    const splitDocs = await textSplitter.splitDocuments(docs);
+    // initiate the job status
+    jobStatus.set(job.id, {status: "queued", progress: 0})
 
-    console.log(`Created ${splitDocs.length} text chunks`);
-
-    // Vector Embeddings
-    const embeddingModel = new OpenAIEmbeddings({
-      modelName: "text-embedding-3-large",
-      openAIApiKey: process.env.OPENAI_API_KEY, // Make sure to set this in your .env file
-    });
-
-    console.log("Creating vector embeddings...");
-
-    const pdf_id = req.file.filename.split(".")[0];
-
-    // Simple connection test
-    try {
-      const testResponse = await fetch(`${QDRANT_URL}/collections`);
-      console.log(`Qdrant connection test: ${testResponse.status}`);
-    } catch (err) {
-      console.error("Qdrant connection failed!", err);
-    }
-
-    const vectorStore = await QdrantVectorStore.fromDocuments(
-      splitDocs, // Your split documents array
-      embeddingModel,
-      {
-        url: QDRANT_URL,
-        collectionName: pdf_id,
-      }
-    );
-
-    console.log("Vector embeddings created successfully!");
-
-    // console.log(vectorStore);
-
-    // console.log('Unique name is: ',uniqueName);
-    console.log("collection name: ", pdf_id);
+    console.log('Job status: ', jobStatus);
+    
 
     res.status(200).json({
       status: "success",
       message: "PDF uploaded and processed successfully",
       data: {
+        jobId: job.id,
+        jobName: job.name,
         originalName: req.file.originalname,
         fileSize: req.file.size,
-        chunksCreated: splitDocs.length,
-        processedAt: new Date().toISOString(),
-        pdfID: pdf_id,
+        // chunksCreated: splitDocs.length,
+        // processedAt: new Date().toISOString(),
+        // pdfID: pdf_id,
+        queueType: queueType,
       },
     });
   } catch (error) {
-    console.error("PDF Processing Error:", error);
+    console.error("Upload Error:", error);
 
     //Clean up file on error
     if (req.file && fs.existsSync(req.file.path)) {
@@ -147,6 +251,35 @@ app.post("/api/upload", upload.single("pdf"), async (req, res) => {
       status: "error",
       message: "Failed to process PDF",
       code: "PROCESSING_ERROR",
+    });
+  }
+});
+
+// New endpoint to check job status
+app.get("/api/job-status/:jobId", async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const status = jobStatus.get(jobId);
+
+    if (!status) {
+      return res.status(404).json({
+        status: "error",
+        message: "Job not found",
+      });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        jobId: jobId,
+        ...status,
+      },
+    });
+  } catch (error) {
+    console.error("Status Check Error:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to get job status",
     });
   }
 });
@@ -207,29 +340,29 @@ app.post("/api/chat", async (req, res) => {
 
     const SYSTEM_PROMPT = `You are a specialized PDF Assistant designed to help users navigate and understand technical documents. Your primary function is to answer queries using only the provided context from PDF files, including page contents and page numbers.
 
-## Core Guidelines:
+          ## Core Guidelines:
 
-**Scope & Limitations:**
-- Answer ONLY based on the provided PDF context - do not use external knowledge
-- Focus exclusively on technical, factual, and document-specific information
-- Do NOT provide advice on: cooking, health, relationships, politics, or other non-technical subjects
-- If a query falls outside your scope, politely redirect: "I can only help with technical information from this PDF document."
+          **Scope & Limitations:**
+          - Answer ONLY based on the provided PDF context - do not use external knowledge
+          - Focus exclusively on technical, factual, and document-specific information
+          - Do NOT provide advice on: cooking, health, relationships, politics, or other non-technical subjects
+          - If a query falls outside your scope, politely redirect: "I can only help with technical information from this PDF document."
 
-**Response Format:**
-- Provide clear, concise answers based on the PDF content
-- Always include specific page references: "According to page [X]..." or "See page [X] for more details"
-- When relevant information spans multiple pages, cite all applicable page numbers
-- If information is incomplete, direct users to specific pages for comprehensive details
+          **Response Format:**
+          - Provide clear, concise answers based on the PDF content
+          - Always include specific page references: "According to page [X]..." or "See page [X] for more details"
+          - When relevant information spans multiple pages, cite all applicable page numbers
+          - If information is incomplete, direct users to specific pages for comprehensive details
 
-**User Navigation:**
-- Actively guide users to relevant page numbers for deeper understanding
-- Use phrases like: "For complete details, please refer to page [X]" or "You can find additional information on pages [X-Y]"
-- When answering partially, suggest: "For the full context, I recommend reviewing page [X]"
+          **User Navigation:**
+          - Actively guide users to relevant page numbers for deeper understanding
+          - Use phrases like: "For complete details, please refer to page [X]" or "You can find additional information on pages [X-Y]"
+          - When answering partially, suggest: "For the full context, I recommend reviewing page [X]"
 
-**Quality Standards:**
-- Be precise and factual
-- Acknowledge when information is not available in the provided context
-- Maintain a helpful, professional tone focused on document navigation and technical clarity
+          **Quality Standards:**
+          - Be precise and factual
+          - Acknowledge when information is not available in the provided context
+          - Maintain a helpful, professional tone focused on document navigation and technical clarity
 
     Context:
     ${contextText}`;

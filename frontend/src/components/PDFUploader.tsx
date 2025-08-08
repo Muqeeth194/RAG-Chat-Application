@@ -15,6 +15,7 @@ interface UploadResponse {
     chunksCreated: number;
     processedAt: string;
     pdfID: string;
+    jobId: string;
   };
   code?: string;
   error?: string;
@@ -27,6 +28,8 @@ export default function PDFUploader() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<UploadResponse | null>(null);
+  const [jobStatus, setJobStatus] = useState<any>(null);
+  const [showDetails, setShowDetails] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -72,6 +75,19 @@ export default function PDFUploader() {
       const result: UploadResponse = await res.json();
       setResponse(result);
 
+      if (result && result.data && result.data.jobId) {
+      const stat = await fetch(
+        `http://localhost:5000/api/job-status/${result.data.jobId}`,
+        {
+          method: "GET",
+        }
+      );
+      const job_status = await stat.json();
+      setJobStatus(job_status);
+    } else {
+      console.log("No job ID received from upload");
+    }
+
       // Reset form on success
       if (result.status === "success") {
         setFile(null);
@@ -95,6 +111,23 @@ export default function PDFUploader() {
     setResponse(null);
     const fileInput = document.getElementById("file") as HTMLInputElement;
     if (fileInput) fileInput.value = "";
+  };
+
+  const handleRefresh = async () => {
+    if (response && response.data && response.data.jobId) {
+      const stat = await fetch(
+        `http://localhost:5000/api/job-status/${response.data.jobId}`,
+        {
+          method: "GET",
+        }
+      );
+      const job_status = await stat.json();
+      setJobStatus(job_status);
+    } else {
+      console.log("No job ID received from upload");
+    }
+
+    setShowDetails(true);
   };
 
   return (
@@ -148,7 +181,7 @@ export default function PDFUploader() {
           </form>
 
           {/* Response Display */}
-          {response && (
+          {response && jobStatus && (
             <div className="mt-4">
               <Alert
                 className={
@@ -166,22 +199,25 @@ export default function PDFUploader() {
                     }
                   >
                     <p className="font-semibold">
-                      {response.status === "success"
+                      {jobStatus.data?.status === "completed"
                         ? `✅ ${response.message}`
-                        : "❌ Error"}
+                        : "❌ Processing..."}
                     </p>
-                    <p className="text-xs mt-1">
-                      (Please make a note of your PDF ID)
-                    </p>
+                    <p className="text-xs mt-1">(Please refresh to get the status)</p>
 
-                    {response.data && (
+                    {response.data && jobStatus?.data && (
                       <div className="mt-2 text-sm space-y-1">
-                        <p>PDF ID: {response.data.pdfID}</p>
+                        <Button onClick={handleRefresh}>Refresh</Button>
+
+                        <p>Job Status: {jobStatus.data.status}</p>
+                        <p>PDF ID: {jobStatus.data.result?.pdfID}</p>
                         <p>File: {response.data.originalName}</p>
-                        <p>Chunks Created: {response.data.chunksCreated}</p>
+                        <p>Chunks Created: {jobStatus.data.result?.chunksCreated}</p>
                         <p>
-                          Processed:{" "}
-                          {new Date(response.data.processedAt).toLocaleString()}
+                          Processed on:{" "}
+                          {new Date(
+                            jobStatus.data.result?.processedAt
+                          ).toLocaleString()}
                         </p>
 
                         <div className="flex w-full max-w-sm items-center gap-2">
@@ -192,9 +228,7 @@ export default function PDFUploader() {
                             onChange={(e) => setPdfId(e.target.value)}
                           />
                           <Button
-                            onClick={() =>
-                              navigate(`/chat/${pdfId}`)
-                            }
+                            onClick={() => navigate(`/chat/${pdfId}`)}
                             // Disable if empty or whitespace
                             disabled={!pdfId.trim()}
                           >
